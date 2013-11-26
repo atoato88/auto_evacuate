@@ -1,20 +1,16 @@
 # -*- coding:utf-8 -*-
 
 # TODO:implement logging
-# TODO:load ini file
-# TODO:error process for zabbix api
 # TODO:error process for others
 
 import sys
 import time
 import pprint
 import ConfigParser
-from pyzabbix import ZabbixAPI
 from novaclient.v1_1.client import Client
 import novaclient.exceptions
 
 """
-args
 @param event_id id for target event 
 @param broken_hostname name for broken physical server. specify hostname with full match.
 @return succes 0
@@ -58,6 +54,9 @@ ignore_zabbix_api_connection = config.getboolean('DEFAULT', 'ignore_zabbix_api_c
 # FIXME: below param is unused.
 wait_duplicate_process = config.getboolean('DEFAULT', 'wait_duplicate_process')
 # ---------------------------------------------------------------------------------------
+
+if zabbix_comment_update:
+    from pyzabbix import ZabbixAPI
 
 """
 update comment on event specified by event_id
