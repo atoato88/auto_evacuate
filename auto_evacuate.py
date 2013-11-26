@@ -28,6 +28,13 @@ argc = len(argvs)
 print argvs
 print argc
 
+if argc == 3:
+    event_id = argvs[1]
+    broken_hostname = argvs[2]
+else:
+    print 'usage: <command> <event_id on zabbix> <broken physical hostname>'
+    sys.exit(1)
+
 # ---------------------------------------------------------------------------------------
 # load settings
 config = ConfigParser.ConfigParser()
