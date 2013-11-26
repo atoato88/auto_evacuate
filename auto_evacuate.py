@@ -98,14 +98,14 @@ def get_novaclient():
     return nova_client
 
 # get vm list on target physical server
-def get_target_vms(nova_client):
+def get_target_vms(nova_client, zapi):
+    target_vms = []
     target_vms = nova_client.servers.list(True, {'all_tenants':1, 'host':broken_hostname})
     #pprint.pprint(target_vms)
 
     if not target_vms:
         pprint.pprint("no target vms.")
         zabbixapi_ackknowledge(zapi, event_id, 'no targt vms. nothing to do.')
-        sys.exit(0)
     return target_vms
 
 # get target physical server of availability zone for surplus.
@@ -165,7 +165,7 @@ def is_finished_evacuate(client, vm_id, destination_hostname):
 
 # FIXME: possibility for infinite loop
 # check completion for evacuate vms.
-def check_evacuate(nova_client, check_vm_list, zapi):
+def check_evacuate(nova_client, check_vm_list, destination_host, zapi):
     start_time = time.time()
     while True:
         if len(check_vm_list) == 0:
@@ -194,16 +194,17 @@ def main():
     novaclient = get_novaclient()
 
     # get vm list on target physical server
-    target_vms = get_target_vms(novaclient)
-    
-    # get target physical server of availability zone for surplus.
-    destination_host = get_destination_server(novaclient)
-        
-    # process evacuate
-    check_vm_list = process_evacuate(novaclient, target_vms, destination_host, zapi)
+    target_vms = get_target_vms(novaclient, zapi)
 
-    # check completion for evacuate vms.
-    check_evacuate(novaclient, check_vm_list, zapi)
+    if target_vms:
+        # get target physical server of availability zone for surplus.
+        destination_host = get_destination_server(novaclient)
+            
+        # process evacuate
+        check_vm_list = process_evacuate(novaclient, target_vms, destination_host, zapi)
+
+        # check completion for evacuate vms.
+        check_evacuate(novaclient, check_vm_list, destination_host, zapi)
 
     # update trigger comment on zabbix
     zabbixapi_ackknowledge(zapi, event_id, zabbix_message_finish_script % event_id)
