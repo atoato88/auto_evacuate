@@ -10,6 +10,8 @@
 # TODO:error process for others
 
 import sys
+import os
+from os import path
 import time
 import pprint
 import ConfigParser
@@ -19,8 +21,10 @@ import novaclient.exceptions
 event_id = '1833'
 broken_hostname = 'vbox03-01'
 
-zabbix_message_start_script = '[START]auto evacuate script start. event id:%s'
-zabbix_message_finish_script = '[FINISH]auto evacuate script finish. event id:%s'
+# FIXME: modify to include own hostname. because this script may be kicked in multihost at same time.
+execute_hostname = os.uname()[1]
+zabbix_message_start_script = execute_hostname + ':[START]auto evacuate script start. event id:%s'
+zabbix_message_finish_script = execute_hostname + ':[FINISH]auto evacuate script finish. event id:%s'
 
 argvs = sys.argv
 argc = len(argvs)
@@ -37,7 +41,7 @@ else:
 # ---------------------------------------------------------------------------------------
 # load settings
 config = ConfigParser.ConfigParser()
-config.read('/home/ubuntu/auto_evacuate/auto_evacuate.conf')
+config.read( path.dirname( path.abspath( __file__ ) ) + '/' + 'auto_evacuate.conf')
 
 openstack_user = config.get('DEFAULT', 'openstack_user')
 openstack_password = config.get('DEFAULT', 'openstack_password')
@@ -70,7 +74,7 @@ update comment on event specified by event_id
 @param event_id id for target event 
 @param message messega for update
 """
-def zabbixapi_ackknowledge(zabbix_api, event_id, mymessage):
+def zabbixapi_acknowledge(zabbix_api, event_id, mymessage):
     if zabbix_comment_update:
         try:
             zabbix_api.event.acknowledge(eventids=event_id, message=mymessage)
@@ -100,12 +104,13 @@ def get_novaclient():
 # get vm list on target physical server
 def get_target_vms(nova_client, zapi):
     target_vms = []
-    target_vms = nova_client.servers.list(True, {'all_tenants':1, 'host':broken_hostname})
+    # FIXME:exclude error state vm.
+    target_vms = nova_client.servers.list(True, {'all_tenants':1, 'host':broken_hostname, 'status':'ACTIVE'})
     #pprint.pprint(target_vms)
 
     if not target_vms:
-        pprint.pprint("no target vms.")
-        zabbixapi_ackknowledge(zapi, event_id, 'no targt vms. nothing to do.')
+        #pprint.pprint("no target vms.")
+        zabbixapi_acknowledge(zapi, event_id, 'no targt vms on %s. nothing to do.' % broken_hostname)
     return target_vms
 
 # get target physical server of availability zone for surplus.
@@ -140,7 +145,7 @@ def process_evacuate(nova_client, target_vms, destination_host, zapi):
     for vm in target_vms:
         try:
             # update trigger comment on zabbix
-            zabbixapi_ackknowledge(zapi, event_id, "try to evacuate vm(%s) to %s" % (vm.id, destination_host['hostname']) )
+            zabbixapi_acknowledge(zapi, event_id, "try to evacuate vm(%s) from %s to %s" % (vm.id, broken_hostname, destination_host['hostname']) )
             # run evacuate
             nova_client.servers.evacuate(server=vm.id, host=destination_host['hostname'], on_shared_storage=evacuate_with_shared_storage)
             check_vm_list.append(vm.id)
@@ -148,9 +153,9 @@ def process_evacuate(nova_client, target_vms, destination_host, zapi):
             #pprint.pprint(e)
             #print e
             #print e.http_status
-            zabbixapi_ackknowledge(zapi, event_id, "error occurs on evacuate vm. UUID:%s\n%s" % (vm.id, e))
+            zabbixapi_acknowledge(zapi, event_id, "error occurs on evacuate vm. UUID:%s\n%s" % (vm.id, e))
         except Exception as e:
-            zabbixapi_ackknowledge(zapi, event_id, "error occurs on evacuate vm. UUID:%s\n%s" % (vm.id, e))
+            zabbixapi_acknowledge(zapi, event_id, "error occurs on evacuate vm. UUID:%s\n%s" % (vm.id, e))
     return check_vm_list
 
 # check result for evacuate with loop 
@@ -176,41 +181,47 @@ def check_evacuate(nova_client, check_vm_list, destination_host, zapi):
             if is_finished_evacuate(nova_client, vm_id, destination_host['hostname']):
                 check_vm_list.remove(vm_id)
                 # update trigger comment on zabbix
-                zabbixapi_ackknowledge(zapi, event_id, "finish evacuate vm(%s)" % vm_id )
+                zabbixapi_acknowledge(zapi, event_id, "finish evacuate vm(%s)" % vm_id )
         # wait 0.5 sec
         time.sleep(0.5)
 
 
 def main():
-    # FIXME: check duplicate process
+    result = 0
+    try:
+        # FIXME: check duplicate process
 
-    # create zabbix api object
-    zapi = get_zabbix_api()
+        # create zabbix api object
+        zapi = get_zabbix_api()
 
-    # update trigger comment on zabbix
-    zabbixapi_ackknowledge(zapi, event_id, zabbix_message_start_script % event_id)
+        # update trigger comment on zabbix
+        zabbixapi_acknowledge(zapi, event_id, zabbix_message_start_script % event_id)
 
-    # create novaclient object
-    novaclient = get_novaclient()
+        # create novaclient object
+        novaclient = get_novaclient()
 
-    # get vm list on target physical server
-    target_vms = get_target_vms(novaclient, zapi)
+        # get vm list on target physical server
+        target_vms = get_target_vms(novaclient, zapi)
 
-    if target_vms:
-        # get target physical server of availability zone for surplus.
-        destination_host = get_destination_server(novaclient)
-            
-        # process evacuate
-        check_vm_list = process_evacuate(novaclient, target_vms, destination_host, zapi)
+        if target_vms:
+            # get target physical server of availability zone for surplus.
+            destination_host = get_destination_server(novaclient)
+                
+            # process evacuate
+            check_vm_list = process_evacuate(novaclient, target_vms, destination_host, zapi)
 
-        # check completion for evacuate vms.
-        check_evacuate(novaclient, check_vm_list, destination_host, zapi)
+            # check completion for evacuate vms.
+            check_evacuate(novaclient, check_vm_list, destination_host, zapi)
 
-    # update trigger comment on zabbix
-    zabbixapi_ackknowledge(zapi, event_id, zabbix_message_finish_script % event_id)
-    
-    # finish with success code.
-    sys.exit(0)
+    except Exception as e:
+        zabbixapi_acknowledge(zapi, event_id, str(e))
+        result = 1
+    finally:
+        # update trigger comment on zabbix
+        zabbixapi_acknowledge(zapi, event_id, zabbix_message_finish_script % event_id)
+        
+        # finish with exit code.
+        sys.exit(result)
 
 if __name__ == '__main__':
     main()
