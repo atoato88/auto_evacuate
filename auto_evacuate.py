@@ -33,8 +33,8 @@ def parse_args():
     global broken_hostname
     argvs = sys.argv
     argc = len(argvs)
-    print argvs
-    print argc
+    #print argvs
+    #print argc
 
     if argc == 3:
         event_id = argvs[1]
@@ -43,7 +43,6 @@ def parse_args():
         print 'usage: <command> <event_id on zabbix> <broken physical hostname>'
         sys.exit(1)
 
-# ---------------------------------------------------------------------------------------
 def load_config():
     # load settings
     global conf
@@ -76,8 +75,6 @@ def load_config():
         conf['zapi'] = get_zabbix_api()
 
     return conf
-# ---------------------------------------------------------------------------------------
-
 
 """
 update comment on event specified by event_id
