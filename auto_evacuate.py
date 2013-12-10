@@ -92,8 +92,8 @@ def acknowledge(event_id, mymessage):
         try:
             conf['zapi'].event.acknowledge(eventids=event_id, message=mymessage[:255] if len(mymessage) > 255 else mymessage)
         except Exception as e:
-            syslog.syslog(syslog.LOG_ERR, 'some errors occurs with zabbixapi connection')
-            syslog.syslog(syslog.LOG_ERR, str(e))
+            syslog.syslog(syslog.LOG_ERR, '[ERROR]some errors occurs with zabbixapi connection')
+            syslog.syslog(syslog.LOG_ERR, '[ERROR]'+str(e))
             if not ignore_zabbix_api_connection:
                 raise e
 
@@ -107,8 +107,8 @@ def get_zabbix_api():
         try:
             zapi.login(conf['zabbix_user'], conf['zabbix_password'])
         except Exception as e:
-            syslog.syslog(syslog.LOG_ERR, 'some errors occurs')
-            syslog.syslog(syslog.LOG_ERR, str(e))
+            syslog.syslog(syslog.LOG_ERR, '[ERROR]some errors occurs')
+            syslog.syslog(syslog.LOG_ERR, '[ERROR]'+str(e))
     return zapi
 
 # create novaclient object
