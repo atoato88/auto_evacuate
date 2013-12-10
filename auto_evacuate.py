@@ -77,7 +77,7 @@ update comment on event specified by event_id
 def zabbixapi_acknowledge(zabbix_api, event_id, mymessage):
     if zabbix_comment_update:
         try:
-            zabbix_api.event.acknowledge(eventids=event_id, message=mymessage)
+            zabbix_api.event.acknowledge(eventids=event_id, message=mymessage[:255] if len(mymessage) > 255 else mymessage)
         except Exception as e:
             print 'some errors occurs with zabbixapi connection'
             print e
