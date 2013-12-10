@@ -17,6 +17,7 @@ import pprint
 import ConfigParser
 from novaclient.v1_1.client import Client
 import novaclient.exceptions
+import syslog
 
 event_id = ''
 broken_hostname = ''
@@ -84,7 +85,8 @@ update comment on event specified by event_id
 @param event_id id for target event 
 @param message messega for update
 """
-def zabbixapi_acknowledge(event_id, mymessage):
+def acknowledge(event_id, mymessage):
+    syslog.syslog(syslog.LOG_INFO, mymessage)
     if not conf['zabbix_comment_update']:
         return
     zabbix_comment_update=conf['zabbix_comment_update']
@@ -93,8 +95,8 @@ def zabbixapi_acknowledge(event_id, mymessage):
         try:
             conf['zapi'].event.acknowledge(eventids=event_id, message=mymessage[:255] if len(mymessage) > 255 else mymessage)
         except Exception as e:
-            print 'some errors occurs with zabbixapi connection'
-            print e
+            syslog.syslog(syslog.LOG_ERR, 'some errors occurs with zabbixapi connection')
+            syslog.syslog(syslog.LOG_ERR, str(e))
             if not ignore_zabbix_api_connection:
                 raise e
 
@@ -108,8 +110,8 @@ def get_zabbix_api():
         try:
             zapi.login(conf['zabbix_user'], conf['zabbix_password'])
         except Exception as e:
-            print 'some errors occurs'
-            print e
+            syslog.syslog(syslog.LOG_ERR, 'some errors occurs')
+            syslog.syslog(syslog.LOG_ERR, str(e))
     return zapi
 
 # create novaclient object
@@ -122,11 +124,9 @@ def get_target_vms(nova_client):
     target_vms = []
     # FIXME:exclude error state vm.
     target_vms = nova_client.servers.list(True, {'all_tenants':1, 'host':broken_hostname, 'status':'ACTIVE'})
-    #pprint.pprint(target_vms)
 
     if not target_vms:
-        #pprint.pprint("no target vms.")
-        zabbixapi_acknowledge(event_id, 'no target vms on %s. nothing to do.' % broken_hostname)
+        acknowledge(event_id, 'no target vms on %s. nothing to do.' % broken_hostname)
     return target_vms
 
 # get target physical server of availability zone for surplus.
@@ -137,7 +137,6 @@ def get_destination_server(nova_client):
     for e in availability_zone_list:
         if e.zoneName == conf['surplus_availability_zone_name']:
             target_availability_zone = e
-            #pprint.pprint(target_availability_zone)
 
     def is_valid_destination_host(client, hostname):
         if len(client.servers.list(True, {'all_tenants':1, 'host':hostname})) == 0:
@@ -152,7 +151,6 @@ def get_destination_server(nova_client):
             destination_host = hosts[h]
             destination_host['hostname'] = h
             break
-    #pprint.pprint(destination_host)
     return destination_host
 
 # choose one vm
@@ -161,7 +159,7 @@ def process_evacuate(nova_client, target_vms, destination_host):
     for vm in target_vms:
         try:
             # update trigger comment on zabbix
-            zabbixapi_acknowledge(event_id, "try to evacuate vm(%s) from %s to %s" % (vm.id, broken_hostname, destination_host['hostname']) )
+            acknowledge(event_id, "try to evacuate vm(%s) from %s to %s" % (vm.id, broken_hostname, destination_host['hostname']) )
             # run evacuate
             nova_client.servers.evacuate(server=vm.id, host=destination_host['hostname'], on_shared_storage=conf['evacuate_with_shared_storage'])
             check_vm_list.append(vm.id)
@@ -169,9 +167,9 @@ def process_evacuate(nova_client, target_vms, destination_host):
             #pprint.pprint(e)
             #print e
             #print e.http_status
-            zabbixapi_acknowledge(event_id, "error occurs on evacuate vm. UUID:%s\n%s" % (vm.id, e))
+            acknowledge(event_id, "error occurs on evacuate vm. UUID:%s\n%s" % (vm.id, e))
         except Exception as e:
-            zabbixapi_acknowledge(event_id, "error occurs on evacuate vm. UUID:%s\n%s" % (vm.id, e))
+            acknowledge(event_id, "error occurs on evacuate vm. UUID:%s\n%s" % (vm.id, e))
     return check_vm_list
 
 # check result for evacuate with loop 
@@ -198,11 +196,12 @@ def check_evacuate(nova_client, check_vm_list, destination_host):
             if is_finished_evacuate(nova_client, vm_id, destination_host['hostname']):
                 check_vm_list.remove(vm_id)
                 # update trigger comment on zabbix
-                zabbixapi_acknowledge(event_id, "finish evacuate vm(%s)" % vm_id )
+                acknowledge(event_id, "finish evacuate vm(%s)" % vm_id )
         # wait 0.5 sec
         time.sleep(0.5)
 
 def main():
+    syslog.openlog('auto_evacuate', syslog.LOG_PID, syslog.LOG_SYSLOG)
     parse_args()
     load_config()
     result = 0
@@ -210,7 +209,7 @@ def main():
         # FIXME: check duplicate process
 
         # update event comment on zabbix
-        zabbixapi_acknowledge(event_id, zabbix_message_start_script % event_id)
+        acknowledge(event_id, zabbix_message_start_script % event_id)
 
         # create novaclient object
         novaclient = get_novaclient()
@@ -229,11 +228,13 @@ def main():
             check_evacuate(novaclient, check_vm_list, destination_host)
 
     except Exception as e:
-        zabbixapi_acknowledge(event_id, str(e))
+        acknowledge(event_id, str(e))
         result = 1
     finally:
         # update event comment on zabbix
-        zabbixapi_acknowledge(event_id, zabbix_message_finish_script % event_id)
+        acknowledge(event_id, zabbix_message_finish_script % event_id)
+
+        syslog.closelog()
         
         # finish with exit code.
         sys.exit(result)
