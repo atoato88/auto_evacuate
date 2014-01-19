@@ -58,6 +58,7 @@ def load_config():
     # FIXME: below param is unused.
     conf['retry_count'] = config.getint('DEFAULT', 'retry_count')
     conf['timeout'] = config.getint('DEFAULT', 'timeout')
+    conf['sleep_time'] = config.getfloat('DEFAULT', 'sleep_time')
     # FIXME: below param is unused.
     conf['concurrent_evacuate_count'] = config.getint('DEFAULT', 'concurrent_evacuate_count')
 
@@ -119,21 +120,23 @@ def get_novaclient():
 # get vm list on target physical server
 def get_target_vms(nova_client):
     target_vms = []
-    # FIXME:exclude error state vm.
     target_vms = nova_client.servers.list(True, {'all_tenants':1, 'host':broken_hostname, 'status':'ACTIVE'})
 
     if not target_vms:
         acknowledge(event_id, 'no target vms on %s. nothing to do.' % broken_hostname)
     return target_vms
 
-# get target physical server of availability zone for surplus.
+# get target physical server for surplus.
 def get_destination_server(nova_client):
-    availability_zone_list = nova_client.availability_zones.list()
+    destination_hosts = []
+    destination_host = None
+
+    nova_servers = nova_client.services.list(binary='nova-compute')
 
     # FIXME: refactor into more efficient search logic.
-    for e in availability_zone_list:
-        if e.zoneName == conf['surplus_availability_zone_name']:
-            target_availability_zone = e
+    for s in nova_servers:
+        if (s.zone == conf['surplus_availability_zone_name']) and (s.status == 'disabled'):
+            destination_hosts.append(s)
 
     def is_valid_destination_host(client, hostname):
         if len(client.servers.list(True, {'all_tenants':1, 'host':hostname})) == 0:
@@ -142,12 +145,12 @@ def get_destination_server(nova_client):
             return False
 
     # check vm-space on target physical server
-    hosts = target_availability_zone.hosts
-    for h in hosts:
-        if is_valid_destination_host(nova_client, h):
-            destination_host = hosts[h]
-            destination_host['hostname'] = h
+    for h in destination_hosts:
+        if is_valid_destination_host(nova_client, h.host):
+            destination_host = h
             break
+    if not destination_host:
+        acknowledge(event_id, 'no destination physical server exists.')
     return destination_host
 
 # choose one vm
@@ -156,14 +159,12 @@ def process_evacuate(nova_client, target_vms, destination_host):
     for vm in target_vms:
         try:
             # update trigger comment on zabbix
-            acknowledge(event_id, "try to evacuate vm(%s) from %s to %s" % (vm.id, broken_hostname, destination_host['hostname']) )
+            acknowledge(event_id, "try to evacuate vm(%s) from %s to %s" % (vm.id, broken_hostname, destination_host.host) )
             # run evacuate
-            nova_client.servers.evacuate(server=vm.id, host=destination_host['hostname'], on_shared_storage=conf['evacuate_with_shared_storage'])
+            nova_client.servers.evacuate(server=vm.id, host=destination_host.host, on_shared_storage=conf['evacuate_with_shared_storage'])
             check_vm_list.append(vm.id)
         except novaclient.exceptions.BadRequest as e:
-            #pprint.pprint(e)
             #print e
-            #print e.http_status
             acknowledge(event_id, "error occurs on evacuate vm. UUID:%s\n%s" % (vm.id, e))
         except Exception as e:
             acknowledge(event_id, "error occurs on evacuate vm. UUID:%s\n%s" % (vm.id, e))
@@ -172,6 +173,11 @@ def process_evacuate(nova_client, target_vms, destination_host):
 # check result for evacuate with loop 
 def is_finished_evacuate(client, vm_id, destination_hostname):
     s = client.servers.get(server=vm_id)
+    acknowledge(event_id, "vm_id:%s, host:%s, status:%s, task_state:%s" % 
+                          (str(vm_id), s._info['OS-EXT-SRV-ATTR:host'], 
+                            s.status, 
+                            s._info['OS-EXT-STS:task_state'] ) 
+                )
     if (s._info['OS-EXT-SRV-ATTR:host'] == destination_hostname) and \
         (s.status == u'ACTIVE') and \
         (s._info['OS-EXT-STS:task_state'] == None):
@@ -184,18 +190,21 @@ def is_finished_evacuate(client, vm_id, destination_hostname):
 def check_evacuate(nova_client, check_vm_list, destination_host):
     start_time = time.time()
     timeout = conf['timeout']
+    sleep_time = conf['sleep_time']
     while True:
         if len(check_vm_list) == 0:
             break
         if time.time() - start_time > timeout:
+            acknowledge(event_id, "timeout for checking evacuate status." )
             break
         for vm_id in check_vm_list:
-            if is_finished_evacuate(nova_client, vm_id, destination_host['hostname']):
+            acknowledge(event_id, "check for status vm(%s)" % vm_id )
+            if is_finished_evacuate(nova_client, vm_id, destination_host.host):
                 check_vm_list.remove(vm_id)
                 # update trigger comment on zabbix
                 acknowledge(event_id, "finish evacuate vm(%s)" % vm_id )
-        # wait 0.5 sec
-        time.sleep(0.5)
+        # wait 1.0 sec
+        time.sleep(sleep_time)
 
 def main():
     syslog.openlog('auto_evacuate', syslog.LOG_PID, syslog.LOG_SYSLOG)
@@ -213,11 +222,11 @@ def main():
 
         # get vm list on target physical server
         target_vms = get_target_vms(novaclient)
+        
+        # get target physical server for surplus.
+        destination_host = get_destination_server(novaclient)
 
-        if target_vms:
-            # get target physical server of availability zone for surplus.
-            destination_host = get_destination_server(novaclient)
-                
+        if target_vms and destination_host:
             # process evacuate
             check_vm_list = process_evacuate(novaclient, target_vms, destination_host)
 
