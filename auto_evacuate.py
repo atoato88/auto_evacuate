@@ -18,6 +18,7 @@ import ConfigParser
 from novaclient.v1_1.client import Client
 import novaclient.exceptions
 import syslog
+import optparse
 
 event_id = ''
 broken_hostname = ''
@@ -29,18 +30,25 @@ zabbix_message_start_script = execute_hostname + ':[START]auto evacuate script s
 zabbix_message_finish_script = execute_hostname + ':[FINISH]auto evacuate script finish. event id:%s'
 
 def parse_args():
+    help_str = 'usage: <command> <event_id on zabbix> <broken physical hostname> [--dry-run]\n if --dry-run present, don\'t process evacuate. check only.'
+    parser = optparse.OptionParser()
+    parser.add_option('--dry-run', action="store_true", default=False)
+
+    (options, args) = parser.parse_args()
+    #print options
+
     global event_id
     global broken_hostname
-    argvs = sys.argv
-    argc = len(argvs)
-    #print argvs
-    #print argc
+    global dry_run
+    dry_run = options.dry_run
 
-    if argc == 3:
-        event_id = argvs[1]
-        broken_hostname = argvs[2]
+    if len(args) == 2:
+        event_id = args[0]
+        broken_hostname = args[1]
+        print event_id
+        print broken_hostname
     else:
-        print 'usage: <command> <event_id on zabbix> <broken physical hostname>'
+        print help_str
         sys.exit(1)
 
 def load_config():
@@ -54,6 +62,10 @@ def load_config():
     conf['openstack_tenant'] = config.get('DEFAULT', 'openstack_tenant')
     conf['openstack_auth_url'] = config.get('DEFAULT', 'openstack_auth_url')
     conf['surplus_availability_zone_name'] = config.get('DEFAULT', 'surplus_availability_zone_name')
+    conf['surplus_host_dict'] = config._sections['surplus_host']
+    for item in conf['surplus_host_dict'].items():
+        conf['surplus_host_dict'][item[0]] = [ i for i in item[1].split(',') if len(i) != 0 ]
+    
     conf['evacuate_with_shared_storage'] = config.getboolean('DEFAULT', 'evacuate_with_shared_storage')
     # FIXME: below param is unused.
     conf['retry_count'] = config.getint('DEFAULT', 'retry_count')
@@ -120,7 +132,18 @@ def get_novaclient():
 # get vm list on target physical server
 def get_target_vms(nova_client):
     target_vms = []
-    target_vms = nova_client.servers.list(True, {'all_tenants':1, 'host':broken_hostname, 'status':'ACTIVE'})
+    #target_vms = nova_client.servers.list(True, {'all_tenants':1, 'host':broken_hostname, 'status':'ACTIVE'})
+    #nova_client.servers.list(True, {'all_tenants':1, 'host':broken_hostname, 'status':'SHUTOFF'})
+
+    vms = nova_client.servers.list(True, {'all_tenants':1, 'host':broken_hostname})
+    for vm in vms:
+        if vm.__dict__['OS-EXT-STS:vm_state'] in ['active', 'stopped']:
+            print vm.__dict__['OS-EXT-STS:vm_state']
+            target_vms.append(vm)
+
+    # or should use vm-extension status?
+    for vm in target_vms:
+        acknowledge(event_id, 'target vm:%s' % vm.id )
 
     if not target_vms:
         acknowledge(event_id, 'no target vms on %s. nothing to do.' % broken_hostname)
@@ -131,12 +154,20 @@ def get_destination_server(nova_client):
     destination_hosts = []
     destination_host = None
 
-    nova_servers = nova_client.services.list(binary='nova-compute')
+    broken_nova_compute = None
+    #nova_servers = nova_client.services.list(binary='nova-compute')
+    for server in nova_client.services.list(binary='nova-compute'):
+        if server.host == broken_hostname:
+            broken_nova_compute = server
+            destination_hosts = conf['surplus_host_dict'][broken_nova_compute.zone]
+            print destination_hosts
+            break
 
+            
     # FIXME: refactor into more efficient search logic.
-    for s in nova_servers:
-        if (s.zone == conf['surplus_availability_zone_name']) and (s.status == 'disabled'):
-            destination_hosts.append(s)
+    #for s in nova_servers:
+    #    if (s.zone == conf['surplus_availability_zone_name']) and (s.status == 'disabled'):
+    #        destination_hosts.append(s)
 
     def is_valid_destination_host(client, hostname):
         if len(client.servers.list(True, {'all_tenants':1, 'host':hostname})) == 0:
@@ -146,8 +177,10 @@ def get_destination_server(nova_client):
 
     # check vm-space on target physical server
     for h in destination_hosts:
-        if is_valid_destination_host(nova_client, h.host):
+        if is_valid_destination_host(nova_client, h):
             destination_host = h
+            acknowledge(event_id, 'destination physical server:' % h )
+            print('destination physical server:' % h )
             break
     if not destination_host:
         acknowledge(event_id, 'no destination physical server exists.')
@@ -211,11 +244,13 @@ def main():
     parse_args()
     load_config()
     result = 0
+    print conf
     try:
         # FIXME: check duplicate process
 
         # update event comment on zabbix
         acknowledge(event_id, zabbix_message_start_script % event_id)
+        acknowledge(event_id, "broken_hostname:%s"  % broken_hostname)
 
         # create novaclient object
         novaclient = get_novaclient()
@@ -226,7 +261,7 @@ def main():
         # get target physical server for surplus.
         destination_host = get_destination_server(novaclient)
 
-        if target_vms and destination_host:
+        if target_vms and destination_host and not dry_run:
             # process evacuate
             check_vm_list = process_evacuate(novaclient, target_vms, destination_host)
 
