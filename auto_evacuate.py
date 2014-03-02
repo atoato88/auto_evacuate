@@ -45,8 +45,8 @@ def parse_args():
     if len(args) == 2:
         event_id = args[0]
         broken_hostname = args[1]
-        print event_id
-        print broken_hostname
+        #print event_id
+        #print broken_hostname
     else:
         print help_str
         sys.exit(1)
@@ -64,7 +64,7 @@ def load_config():
     conf['surplus_availability_zone_name'] = config.get('DEFAULT', 'surplus_availability_zone_name')
     conf['surplus_host_dict'] = config._sections['surplus_host']
     for item in conf['surplus_host_dict'].items():
-        conf['surplus_host_dict'][item[0]] = [ i for i in item[1].split(',') if len(i) != 0 ]
+        conf['surplus_host_dict'][item[0]] = [ i.strip() for i in item[1].split(',') if len(i.strip()) != 0 ]
     
     conf['evacuate_with_shared_storage'] = config.getboolean('DEFAULT', 'evacuate_with_shared_storage')
     # FIXME: below param is unused.
@@ -138,7 +138,7 @@ def get_target_vms(nova_client):
     vms = nova_client.servers.list(True, {'all_tenants':1, 'host':broken_hostname})
     for vm in vms:
         if vm.__dict__['OS-EXT-STS:vm_state'] in ['active', 'stopped']:
-            print vm.__dict__['OS-EXT-STS:vm_state']
+            #print vm.__dict__['OS-EXT-STS:vm_state']
             target_vms.append(vm)
 
     # or should use vm-extension status?
@@ -160,7 +160,7 @@ def get_destination_server(nova_client):
         if server.host == broken_hostname:
             broken_nova_compute = server
             destination_hosts = conf['surplus_host_dict'][broken_nova_compute.zone]
-            print destination_hosts
+            #print destination_hosts
             break
 
             
@@ -180,7 +180,7 @@ def get_destination_server(nova_client):
         if is_valid_destination_host(nova_client, h):
             destination_host = h
             acknowledge(event_id, 'destination physical server:' % h )
-            print('destination physical server:' % h )
+            #print('destination physical server:' % h )
             break
     if not destination_host:
         acknowledge(event_id, 'no destination physical server exists.')
@@ -244,13 +244,16 @@ def main():
     parse_args()
     load_config()
     result = 0
-    print conf
+    #print conf
     try:
         # FIXME: check duplicate process
 
         # update event comment on zabbix
         acknowledge(event_id, zabbix_message_start_script % event_id)
         acknowledge(event_id, "broken_hostname:%s"  % broken_hostname)
+        if dry_run:
+            acknowledge(event_id, "DRY RUN MODE")
+            
 
         # create novaclient object
         novaclient = get_novaclient()
