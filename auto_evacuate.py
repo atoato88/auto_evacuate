@@ -188,7 +188,7 @@ def is_finished_evacuate(client, vm_id, destination_hostname):
                             s._info['OS-EXT-STS:task_state'] ) 
                 )
     if (s._info['OS-EXT-SRV-ATTR:host'] == destination_hostname) and \
-        (s.status == u'ACTIVE') and \
+        (s.status in [u'ACTIVE', u'SHUTOFF']) and \
         (s._info['OS-EXT-STS:task_state'] == None):
         return True
     else:
