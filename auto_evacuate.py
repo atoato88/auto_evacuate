@@ -1,30 +1,27 @@
 # -*- coding:utf-8 -*-
 """
-@param event_id id for target event 
+@param event_id id for target event on zabbix
 @param broken_hostname name for broken physical server. specify hostname with full match.
 @return success 0
         failure 1
 """
 
-# TODO:implement logging
-# TODO:error process for others
-
 import sys
 import os
 from os import path
 import time
-import pprint
 import ConfigParser
 from novaclient.v1_1.client import Client
 import novaclient.exceptions
 import syslog
 import optparse
+import traceback
 
 event_id = ''
 broken_hostname = ''
 conf={}
 
-# FIXME: modify to include own hostname. because this script may be kicked in multihost at same time.
+# include own hostname. because this script may be kicked in multihost at same time.
 execute_hostname = os.uname()[1]
 zabbix_message_start_script = execute_hostname + ':[START]auto evacuate script start. event id:%s'
 zabbix_message_finish_script = execute_hostname + ':[FINISH]auto evacuate script finish. event id:%s'
@@ -35,7 +32,6 @@ def parse_args():
     parser.add_option('--dry-run', action="store_true", default=False)
 
     (options, args) = parser.parse_args()
-    #print options
 
     global event_id
     global broken_hostname
@@ -45,8 +41,6 @@ def parse_args():
     if len(args) == 2:
         event_id = args[0]
         broken_hostname = args[1]
-        #print event_id
-        #print broken_hostname
     else:
         print help_str
         sys.exit(1)
@@ -61,27 +55,19 @@ def load_config():
     conf['openstack_password'] = config.get('DEFAULT', 'openstack_password')
     conf['openstack_tenant'] = config.get('DEFAULT', 'openstack_tenant')
     conf['openstack_auth_url'] = config.get('DEFAULT', 'openstack_auth_url')
-    conf['surplus_availability_zone_name'] = config.get('DEFAULT', 'surplus_availability_zone_name')
     conf['surplus_host_dict'] = config._sections['surplus_host']
     for item in conf['surplus_host_dict'].items():
         conf['surplus_host_dict'][item[0]] = [ i.strip() for i in item[1].split(',') if len(i.strip()) != 0 ]
     
     conf['evacuate_with_shared_storage'] = config.getboolean('DEFAULT', 'evacuate_with_shared_storage')
-    # FIXME: below param is unused.
-    conf['retry_count'] = config.getint('DEFAULT', 'retry_count')
     conf['timeout'] = config.getint('DEFAULT', 'timeout')
     conf['sleep_time'] = config.getfloat('DEFAULT', 'sleep_time')
-    # FIXME: below param is unused.
-    conf['concurrent_evacuate_count'] = config.getint('DEFAULT', 'concurrent_evacuate_count')
 
     conf['zabbix_user'] = config.get('DEFAULT', 'zabbix_user')
     conf['zabbix_password'] = config.get('DEFAULT', 'zabbix_password')
     conf['zabbix_url'] = config.get('DEFAULT', 'zabbix_url')
     conf['zabbix_comment_update'] = config.getboolean('DEFAULT', 'zabbix_comment_update')
     conf['ignore_zabbix_api_connection'] = config.getboolean('DEFAULT', 'ignore_zabbix_api_connection')
-
-    # FIXME: below param is unused.
-    conf['wait_duplicate_process'] = config.getboolean('DEFAULT', 'wait_duplicate_process')
     
     if conf['zabbix_comment_update']:
         # create zabbix api object
@@ -90,10 +76,10 @@ def load_config():
     return conf
 
 """
-update comment on event specified by event_id
-@param zabbix_api zabbix api object
+insert log to syslog.
+update comment on event specified by event_id.
 @param event_id id for target event 
-@param message messega for update
+@param message messeage for update
 """
 def acknowledge(event_id, mymessage):
     syslog.syslog(syslog.LOG_INFO, mymessage)
@@ -138,7 +124,6 @@ def get_target_vms(nova_client):
     vms = nova_client.servers.list(True, {'all_tenants':1, 'host':broken_hostname})
     for vm in vms:
         if vm.__dict__['OS-EXT-STS:vm_state'] in ['active', 'stopped']:
-            #print vm.__dict__['OS-EXT-STS:vm_state']
             target_vms.append(vm)
 
     # or should use vm-extension status?
@@ -160,14 +145,7 @@ def get_destination_server(nova_client):
         if server.host == broken_hostname:
             broken_nova_compute = server
             destination_hosts = conf['surplus_host_dict'][broken_nova_compute.zone]
-            #print destination_hosts
             break
-
-            
-    # FIXME: refactor into more efficient search logic.
-    #for s in nova_servers:
-    #    if (s.zone == conf['surplus_availability_zone_name']) and (s.status == 'disabled'):
-    #        destination_hosts.append(s)
 
     def is_valid_destination_host(client, hostname):
         if len(client.servers.list(True, {'all_tenants':1, 'host':hostname})) == 0:
@@ -179,28 +157,26 @@ def get_destination_server(nova_client):
     for h in destination_hosts:
         if is_valid_destination_host(nova_client, h):
             destination_host = h
-            acknowledge(event_id, 'destination physical server:' % h )
-            #print('destination physical server:' % h )
+            acknowledge(event_id, 'destination physical server:%s' % h )
             break
     if not destination_host:
         acknowledge(event_id, 'no destination physical server exists.')
     return destination_host
 
-# choose one vm
+# evacuate vm
 def process_evacuate(nova_client, target_vms, destination_host):
     check_vm_list = []
     for vm in target_vms:
         try:
             # update trigger comment on zabbix
-            acknowledge(event_id, "try to evacuate vm(%s) from %s to %s" % (vm.id, broken_hostname, destination_host.host) )
+            acknowledge(event_id, "try to evacuate vm(%s) from %s to %s" % (vm.id, broken_hostname, destination_host) )
             # run evacuate
-            nova_client.servers.evacuate(server=vm.id, host=destination_host.host, on_shared_storage=conf['evacuate_with_shared_storage'])
+            nova_client.servers.evacuate(server=vm.id, host=destination_host, on_shared_storage=conf['evacuate_with_shared_storage'])
             check_vm_list.append(vm.id)
         except novaclient.exceptions.BadRequest as e:
-            #print e
-            acknowledge(event_id, "error occurs on evacuate vm. UUID:%s\n%s" % (vm.id, e))
+            acknowledge(event_id, "error occurs on evacuate vm. UUID:%s\n%s" % (vm.id, traceback.format_exc()))
         except Exception as e:
-            acknowledge(event_id, "error occurs on evacuate vm. UUID:%s\n%s" % (vm.id, e))
+            acknowledge(event_id, "error occurs on evacuate vm. UUID:%s\n%s" % (vm.id, traceback.format_exc()))
     return check_vm_list
 
 # check result for evacuate with loop 
@@ -218,8 +194,7 @@ def is_finished_evacuate(client, vm_id, destination_hostname):
     else:
         return False
 
-# FIXME: possibility for infinite loop
-# check completion for evacuate vms.
+# check completion for evacuated vms.
 def check_evacuate(nova_client, check_vm_list, destination_host):
     start_time = time.time()
     timeout = conf['timeout']
@@ -232,11 +207,11 @@ def check_evacuate(nova_client, check_vm_list, destination_host):
             break
         for vm_id in check_vm_list:
             acknowledge(event_id, "check for status vm(%s)" % vm_id )
-            if is_finished_evacuate(nova_client, vm_id, destination_host.host):
+            if is_finished_evacuate(nova_client, vm_id, destination_host):
                 check_vm_list.remove(vm_id)
-                # update trigger comment on zabbix
+                # update log
                 acknowledge(event_id, "finish evacuate vm(%s)" % vm_id )
-        # wait 1.0 sec
+        # wait
         time.sleep(sleep_time)
 
 def main():
@@ -244,7 +219,6 @@ def main():
     parse_args()
     load_config()
     result = 0
-    #print conf
     try:
         # FIXME: check duplicate process
 
@@ -253,7 +227,6 @@ def main():
         acknowledge(event_id, "broken_hostname:%s"  % broken_hostname)
         if dry_run:
             acknowledge(event_id, "DRY RUN MODE")
-            
 
         # create novaclient object
         novaclient = get_novaclient()
@@ -272,7 +245,7 @@ def main():
             check_evacuate(novaclient, check_vm_list, destination_host)
 
     except Exception as e:
-        acknowledge(event_id, str(e))
+        acknowledge(event_id, traceback.format_exc())
         result = 1
     finally:
         # update event comment on zabbix
