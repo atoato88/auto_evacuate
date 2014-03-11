@@ -123,7 +123,9 @@ def get_target_vms(nova_client):
 
     vms = nova_client.servers.list(True, {'all_tenants':1, 'host':broken_hostname})
     for vm in vms:
-        if vm.__dict__['OS-EXT-STS:vm_state'] in ['active', 'stopped']:
+        #if vm.__dict__['OS-EXT-STS:vm_state'] in ['active', 'stopped']:
+        #if vm.__dict__['OS-EXT-STS:vm_state'] in ['active', 'stopped', 'suspended', 'paused', 'resized', 'soft-delete', 'building', 'rescued']:
+        if vm.__dict__['OS-EXT-STS:vm_state'] not in ['error', 'deleted']:
             target_vms.append(vm)
 
     # or should use vm-extension status?
@@ -188,7 +190,7 @@ def is_finished_evacuate(client, vm_id, destination_hostname):
                             s._info['OS-EXT-STS:task_state'] ) 
                 )
     if (s._info['OS-EXT-SRV-ATTR:host'] == destination_hostname) and \
-        (s.status in [u'ACTIVE', u'SHUTOFF']) and \
+        (s.status in [u'ACTIVE', u'SHUTOFF', u'SUSPENDED', u'PAUSED']) and \
         (s._info['OS-EXT-STS:task_state'] == None):
         return True
     else:
