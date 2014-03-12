@@ -118,19 +118,16 @@ def get_novaclient():
 # get vm list on target physical server
 def get_target_vms(nova_client):
     target_vms = []
-    #target_vms = nova_client.servers.list(True, {'all_tenants':1, 'host':broken_hostname, 'status':'ACTIVE'})
-    #nova_client.servers.list(True, {'all_tenants':1, 'host':broken_hostname, 'status':'SHUTOFF'})
 
     vms = nova_client.servers.list(True, {'all_tenants':1, 'host':broken_hostname})
     for vm in vms:
         #if vm.__dict__['OS-EXT-STS:vm_state'] in ['active', 'stopped']:
-        #if vm.__dict__['OS-EXT-STS:vm_state'] in ['active', 'stopped', 'suspended', 'paused', 'resized', 'soft-delete', 'building', 'rescued']:
-        if vm.__dict__['OS-EXT-STS:vm_state'] not in ['error', 'deleted']:
+        if vm.__dict__['OS-EXT-STS:vm_state'] in ['active', 'stopped', 'suspended', 'paused']:
             target_vms.append(vm)
 
     # or should use vm-extension status?
     for vm in target_vms:
-        acknowledge(event_id, 'target vm:%s' % vm.id )
+        acknowledge(event_id, 'target vm:%s(%s)' % (vm.id, vm.__dict__['OS-EXT-STS:vm_state']) )
 
     if not target_vms:
         acknowledge(event_id, 'no target vms on %s. nothing to do.' % broken_hostname)
@@ -222,9 +219,7 @@ def main():
     load_config()
     result = 0
     try:
-        # FIXME: check duplicate process
-
-        # update event comment on zabbix
+        # update log
         acknowledge(event_id, zabbix_message_start_script % event_id)
         acknowledge(event_id, "broken_hostname:%s"  % broken_hostname)
         if dry_run:
@@ -250,7 +245,7 @@ def main():
         acknowledge(event_id, traceback.format_exc())
         result = 1
     finally:
-        # update event comment on zabbix
+        # update log 
         acknowledge(event_id, zabbix_message_finish_script % event_id)
 
         syslog.closelog()
