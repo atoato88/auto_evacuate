@@ -37,6 +37,8 @@ def parse_args():
     global broken_hostname
     global dry_run
     dry_run = options.dry_run
+    print options
+    print args
 
     if len(args) == 2:
         event_id = args[0]
@@ -83,6 +85,7 @@ update comment on event specified by event_id.
 """
 def acknowledge(event_id, mymessage):
     syslog.syslog(syslog.LOG_INFO, mymessage)
+    #syslog.syslog(syslog.LOG_INFO, mymessage)
     if not conf['zabbix_comment_update']:
         return
     zabbix_comment_update=conf['zabbix_comment_update']
@@ -125,6 +128,7 @@ def get_target_vms(nova_client):
         if vm.__dict__['OS-EXT-STS:vm_state'] in ['active', 'stopped', 'suspended', 'paused']:
             target_vms.append(vm)
 
+    vms = nova_client.servers.list(True, {'all_tenants':1, 'host':broken_hostname})
     # or should use vm-extension status?
     for vm in target_vms:
         acknowledge(event_id, 'target vm:%s(%s)' % (vm.id, vm.__dict__['OS-EXT-STS:vm_state']) )
@@ -214,7 +218,8 @@ def check_evacuate(nova_client, check_vm_list, destination_host):
         time.sleep(sleep_time)
 
 def main():
-    syslog.openlog('auto_evacuate', syslog.LOG_PID, syslog.LOG_SYSLOG)
+    #syslog.openlog('auto_evacuate', syslog.LOG_PID, syslog.LOG_SYSLOG)
+    syslog.openlog('auto_evacuate')
     parse_args()
     load_config()
     result = 0
