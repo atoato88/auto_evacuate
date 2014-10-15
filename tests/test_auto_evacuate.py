@@ -80,7 +80,7 @@ class AutoEvacuateTest(unittest.TestCase):
     auto_evacuate.acknowledge('dummy zabbix id', 'dummy message')
     self.mox.VerifyAll()
 
-  def test_acknowledge_NG_with_zabbix(self):
+  def test_acknowledge_NG_with_zabbix2(self):
     self.mox.StubOutWithMock(auto_evacuate, 'conf')
     auto_evacuate.conf['zabbix_comment_update'].AndReturn(True)
     auto_evacuate.conf['zabbix_comment_update'].AndReturn(True)
@@ -92,6 +92,19 @@ class AutoEvacuateTest(unittest.TestCase):
     self.mox.ReplayAll()
     with self.assertRaises(Exception):
       auto_evacuate.acknowledge('dummy zabbix id', 'dummy message')
+    self.mox.VerifyAll()
+
+  def test_get_zabbix_api_OK(self):
+    self.mox.StubOutWithMock(auto_evacuate, 'conf')
+    auto_evacuate.conf['zabbix_comment_update'].AndReturn(True)
+    auto_evacuate.conf['zabbix_url'].AndReturn('http://dummy.example.com')
+    zapi_mock = mox.MockAnything()
+    #zapi_mock = self.mox.CreateMock(ZabbixAPI)
+    #ZabbixAPI().login use generic meta idiom in function, so now use MockAnyting instead of CreateMock
+    zapi_mock.login(mox.IgnoreArg(), mox.IgnoreArg()).AndReturn(None)
+
+    self.mox.ReplayAll()
+    auto_evacuate.get_zabbix_api()
     self.mox.VerifyAll()
 
 if __name__ == '__main__':
