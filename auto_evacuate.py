@@ -37,8 +37,6 @@ def parse_args():
     global broken_hostname
     global dry_run
     dry_run = options.dry_run
-    print options
-    print args
 
     if len(args) == 2:
         event_id = args[0]
@@ -218,12 +216,11 @@ def check_evacuate(nova_client, check_vm_list, destination_host):
         time.sleep(sleep_time)
 
 def main():
-    #syslog.openlog('auto_evacuate', syslog.LOG_PID, syslog.LOG_SYSLOG)
-    syslog.openlog('auto_evacuate')
-    parse_args()
-    load_config()
-    result = 0
     try:
+        result = 0
+        syslog.openlog('auto_evacuate', syslog.LOG_PID, syslog.LOG_SYSLOG)
+        parse_args()
+        load_config()
         # update log
         acknowledge(event_id, zabbix_message_start_script % event_id)
         acknowledge(event_id, "broken_hostname:%s"  % broken_hostname)
@@ -246,9 +243,10 @@ def main():
             # check completion for evacuate vms.
             check_evacuate(novaclient, check_vm_list, destination_host)
 
+    #except Exception as e:
     except Exception as e:
-        acknowledge(event_id, traceback.format_exc())
         result = 1
+        acknowledge(event_id, traceback.format_exc())
     finally:
         # update log 
         acknowledge(event_id, zabbix_message_finish_script % event_id)
