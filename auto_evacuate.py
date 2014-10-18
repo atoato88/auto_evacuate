@@ -107,11 +107,8 @@ def get_zabbix_api():
         try:
             zapi.login(conf['zabbix_user'], conf['zabbix_password'])
         except Exception as e:
-            print e
             syslog.syslog(syslog.LOG_ERR, '[ERROR]some errors occurs')
-            print e
             syslog.syslog(syslog.LOG_ERR, '[ERROR]'+str(e))
-            print e
     return zapi
 
 # create novaclient object

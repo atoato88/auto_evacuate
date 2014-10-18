@@ -20,7 +20,6 @@ class AutoEvacuateTest(unittest.TestCase):
     self.mox.UnsetStubs()
 
   def test_parse_args_OK(self):
-    return
     self.mox.StubOutWithMock(optparse.OptionParser, 'parse_args')
     a = optparse.Values()
     a.dry_run = True
@@ -30,7 +29,6 @@ class AutoEvacuateTest(unittest.TestCase):
     self.mox.VerifyAll()
 
   def test_parse_args_NG(self):
-    return
     self.mox.StubOutWithMock(optparse.OptionParser, 'parse_args')
     a = optparse.Values()
     a.dry_run = True
@@ -41,14 +39,12 @@ class AutoEvacuateTest(unittest.TestCase):
     self.mox.VerifyAll()
 
   def test_load_config_OK(self):
-    return
     self.mox.ReplayAll()
     ret = auto_evacuate.load_config()
     #print ret
     self.mox.VerifyAll()
 
   def test_load_config_OK_with_zabbix(self):
-    return
     self.mox.StubOutWithMock(ConfigParser.ConfigParser, 'getboolean')
     ConfigParser.ConfigParser().getboolean(mox.IgnoreArg(), mox.IgnoreArg()).AndReturn(True)
     # above is dummy for ConfigParser.ConfigParser().getboolean('DEFAULT', 'evacuate_with_shared_storage').AndReturn(True)
@@ -65,7 +61,6 @@ class AutoEvacuateTest(unittest.TestCase):
     self.mox.VerifyAll()
 
   def test_acknowledge_OK_without_zabbix(self):
-    return
     self.mox.StubOutWithMock(auto_evacuate, 'conf')
     auto_evacuate.conf['zabbix_comment_update'].AndReturn(False)
 
@@ -74,7 +69,6 @@ class AutoEvacuateTest(unittest.TestCase):
     self.mox.VerifyAll()
 
   def test_acknowledge_OK_with_zabbix(self):
-    return
     self.mox.StubOutWithMock(auto_evacuate, 'conf')
     auto_evacuate.conf['zabbix_comment_update'].AndReturn(True)
     auto_evacuate.conf['zabbix_comment_update'].AndReturn(True)
@@ -88,7 +82,6 @@ class AutoEvacuateTest(unittest.TestCase):
     self.mox.VerifyAll()
 
   def test_acknowledge_NG_with_zabbix2(self):
-    return
     self.mox.StubOutWithMock(auto_evacuate, 'conf')
     auto_evacuate.conf['zabbix_comment_update'].AndReturn(True)
     auto_evacuate.conf['zabbix_comment_update'].AndReturn(True)
@@ -126,11 +119,19 @@ class AutoEvacuateTest(unittest.TestCase):
     self.mox.VerifyAll()
 
   def test_get_zabbix_api_NG(self):
-    return
     self.mox.StubOutWithMock(auto_evacuate, 'conf')
-    auto_evacuate.conf['zabbix_comment_update'].AndReturn(True)
-    auto_evacuate.conf['zabbix_url'].AndReturn('http://dummy.example.com')
+    self.mox.StubOutWithMock(pyzabbix, 'ZabbixAPI')
+    self.mox.StubOutWithMock(ZabbixAPI, 'login')
+    # zapi_mock is OK in anyone below three options.
     zapi_mock = mox.MockAnything()
+    #zapi_mock = self.mox.CreateMock(ZabbixAPI)
+    #zapi_mock = ZabbixAPI('http://dummy.example.com')
+
+    auto_evacuate.conf['zabbix_comment_update'].AndReturn(True)
+    auto_evacuate.conf['zabbix_url'].AndReturn('dummy url')
+    pyzabbix.ZabbixAPI('dummy url').AndReturn(zapi_mock)
+    auto_evacuate.conf['zabbix_user'].AndReturn('user')
+    auto_evacuate.conf['zabbix_password'].AndReturn('password')
     zapi_mock.login(mox.IgnoreArg(), mox.IgnoreArg()).AndRaise(Exception('dummy exception'))
 
     self.mox.ReplayAll()
