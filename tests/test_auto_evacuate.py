@@ -10,6 +10,7 @@ import ConfigParser
 import optparse
 import pyzabbix
 from pyzabbix import ZabbixAPI
+from novaclient.v1_1.client import Client
 
 class AutoEvacuateTest(unittest.TestCase):
 
@@ -120,7 +121,8 @@ class AutoEvacuateTest(unittest.TestCase):
 
   def test_get_zabbix_api_NG(self):
     self.mox.StubOutWithMock(auto_evacuate, 'conf')
-    self.mox.StubOutWithMock(pyzabbix, 'ZabbixAPI')
+    #self.mox.StubOutWithMock(pyzabbix, 'ZabbixAPI')
+    self.mox.StubOutWithMock(ZabbixAPI, '__init__')
     self.mox.StubOutWithMock(ZabbixAPI, 'login')
     # zapi_mock is OK in anyone below three options.
     zapi_mock = mox.MockAnything()
@@ -129,13 +131,33 @@ class AutoEvacuateTest(unittest.TestCase):
 
     auto_evacuate.conf['zabbix_comment_update'].AndReturn(True)
     auto_evacuate.conf['zabbix_url'].AndReturn('dummy url')
-    pyzabbix.ZabbixAPI('dummy url').AndReturn(zapi_mock)
+    #pyzabbix.ZabbixAPI('dummy url').AndReturn(zapi_mock)
+    ZabbixAPI.__init__('dummy url')
     auto_evacuate.conf['zabbix_user'].AndReturn('user')
     auto_evacuate.conf['zabbix_password'].AndReturn('password')
     zapi_mock.login(mox.IgnoreArg(), mox.IgnoreArg()).AndRaise(Exception('dummy exception'))
 
     self.mox.ReplayAll()
     auto_evacuate.get_zabbix_api()
+    self.mox.VerifyAll()
+
+  def test_get_novaclient_OK(self):
+    self.mox.StubOutWithMock(auto_evacuate, 'conf')
+    #self.mox.StubOutWithMock(novaclient.v1_1.client, 'Client')
+    self.mox.StubOutWithMock(Client, '__init__')
+    nova_mock = mox.MockAnything()
+    #nova_mock = self.mox.CreateMock(Client)
+    #nova_mock = Client('user', 'password', 'tenant', 'auth_url')
+
+    auto_evacuate.conf['openstack_user'].AndReturn('user')
+    auto_evacuate.conf['openstack_password'].AndReturn('password')
+    auto_evacuate.conf['openstack_tenant'].AndReturn('tenant')
+    auto_evacuate.conf['openstack_auth_url'].AndReturn('auth_url')
+    #novaclient.v1_1.client.Client('user', 'password', 'tenant', 'auth_url').AndReturn(nova_mock)
+    Client.__init__('user', 'password', 'tenant', 'auth_url')
+
+    self.mox.ReplayAll()
+    auto_evacuate.get_novaclient()
     self.mox.VerifyAll()
 
 if __name__ == '__main__':
