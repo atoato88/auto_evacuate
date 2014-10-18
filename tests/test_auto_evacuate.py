@@ -11,6 +11,7 @@ import optparse
 import pyzabbix
 from pyzabbix import ZabbixAPI
 from novaclient.v1_1.client import Client
+import syslog
 
 class AutoEvacuateTest(unittest.TestCase):
 
@@ -128,6 +129,7 @@ class AutoEvacuateTest(unittest.TestCase):
     zapi_mock = mox.MockAnything()
     #zapi_mock = self.mox.CreateMock(ZabbixAPI)
     #zapi_mock = ZabbixAPI('http://dummy.example.com')
+    self.mox.StubOutWithMock(syslog, 'syslog')
 
     auto_evacuate.conf['zabbix_comment_update'].AndReturn(True)
     auto_evacuate.conf['zabbix_url'].AndReturn('dummy url')
@@ -136,6 +138,8 @@ class AutoEvacuateTest(unittest.TestCase):
     auto_evacuate.conf['zabbix_user'].AndReturn('user')
     auto_evacuate.conf['zabbix_password'].AndReturn('password')
     zapi_mock.login(mox.IgnoreArg(), mox.IgnoreArg()).AndRaise(Exception('dummy exception'))
+    syslog.syslog(syslog.LOG_ERR, mox.IgnoreArg())
+    syslog.syslog(syslog.LOG_ERR, mox.IgnoreArg())
 
     self.mox.ReplayAll()
     auto_evacuate.get_zabbix_api()
@@ -158,6 +162,50 @@ class AutoEvacuateTest(unittest.TestCase):
 
     self.mox.ReplayAll()
     auto_evacuate.get_novaclient()
+    self.mox.VerifyAll()
+
+  def test_get_target_vms_OK(self):
+    nova_client = mox.MockAnything()
+    self.mox.StubOutWithMock(nova_client, 'servers')
+    self.mox.StubOutWithMock(nova_client.servers, 'list')
+    self.mox.StubOutWithMock(auto_evacuate, 'acknowledge')
+    vm = mox.MockAnything()
+    vm.__dict__['OS-EXT-STS:vm_state']='active'
+    vm.id='123456789'
+    vms=[]
+    vms.append(vm)
+    
+    nova_client.servers.list(mox.IgnoreArg(), mox.IgnoreArg()).AndReturn(vms)
+    nova_client.servers.list(mox.IgnoreArg(), mox.IgnoreArg()).AndReturn(vms)
+    auto_evacuate.acknowledge(mox.IgnoreArg(), mox.IgnoreArg())
+
+    self.mox.ReplayAll()
+    auto_evacuate.get_target_vms(nova_client)
+    self.mox.VerifyAll()
+
+  def test_get_destination_server_OK(self):
+    self.mox.StubOutWithMock(auto_evacuate, 'broken_hostname')
+    auto_evacuate.broken_hostname='dummyhost'
+    nova_client = mox.MockAnything()
+    self.mox.StubOutWithMock(nova_client, 'services')
+    self.mox.StubOutWithMock(nova_client.services, 'list')
+    self.mox.StubOutWithMock(nova_client, 'servers')
+    self.mox.StubOutWithMock(nova_client.servers, 'list')
+    self.mox.StubOutWithMock(auto_evacuate, 'acknowledge')
+    server = mox.MockAnything()
+    server.host='dummyhost'
+    server.zone='zone1'
+    servers=[]
+    servers.append(server)
+    self.mox.StubOutWithMock(auto_evacuate, 'conf')
+    
+    nova_client.services.list(binary='nova-compute').AndReturn(servers)
+    auto_evacuate.conf['surplus_host_dict'].AndReturn({'zone1':['host01','host02','host03']})
+    nova_client.servers.list(mox.IgnoreArg(), mox.IgnoreArg()).AndReturn([])
+    auto_evacuate.acknowledge(mox.IgnoreArg(), mox.IgnoreArg())
+
+    self.mox.ReplayAll()
+    auto_evacuate.get_destination_server(nova_client)
     self.mox.VerifyAll()
 
 if __name__ == '__main__':

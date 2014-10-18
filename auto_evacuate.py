@@ -113,9 +113,7 @@ def get_zabbix_api():
 
 # create novaclient object
 def get_novaclient():
-    print 'hoge'
     nova_client = Client(conf['openstack_user'], conf['openstack_password'], conf['openstack_tenant'], conf['openstack_auth_url'])
-    print 'hoge'
     return nova_client
 
 # get vm list on target physical server
