@@ -11,7 +11,9 @@ import optparse
 import pyzabbix
 from pyzabbix import ZabbixAPI
 from novaclient.v1_1.client import Client
+import novaclient.exceptions
 import syslog
+import time
 
 class AutoEvacuateTest(unittest.TestCase):
 
@@ -183,6 +185,24 @@ class AutoEvacuateTest(unittest.TestCase):
     auto_evacuate.get_target_vms(nova_client)
     self.mox.VerifyAll()
 
+  def test_get_target_vms_NG(self):
+    nova_client = mox.MockAnything()
+    self.mox.StubOutWithMock(nova_client, 'servers')
+    self.mox.StubOutWithMock(nova_client.servers, 'list')
+    self.mox.StubOutWithMock(auto_evacuate, 'acknowledge')
+    vm = mox.MockAnything()
+    vm.__dict__['OS-EXT-STS:vm_state']='active'
+    vm.id='123456789'
+    vms=[]
+    
+    nova_client.servers.list(mox.IgnoreArg(), mox.IgnoreArg()).AndReturn(vms)
+    nova_client.servers.list(mox.IgnoreArg(), mox.IgnoreArg()).AndReturn(vms)
+    auto_evacuate.acknowledge(mox.IgnoreArg(), mox.IgnoreArg())
+
+    self.mox.ReplayAll()
+    auto_evacuate.get_target_vms(nova_client)
+    self.mox.VerifyAll()
+
   def test_get_destination_server_OK(self):
     self.mox.StubOutWithMock(auto_evacuate, 'broken_hostname')
     auto_evacuate.broken_hostname='dummyhost'
@@ -206,6 +226,177 @@ class AutoEvacuateTest(unittest.TestCase):
 
     self.mox.ReplayAll()
     auto_evacuate.get_destination_server(nova_client)
+    self.mox.VerifyAll()
+
+  def test_get_destination_server_NG1(self):
+    self.mox.StubOutWithMock(auto_evacuate, 'broken_hostname')
+    auto_evacuate.broken_hostname='dummyhost'
+    nova_client = mox.MockAnything()
+    self.mox.StubOutWithMock(nova_client, 'services')
+    self.mox.StubOutWithMock(nova_client.services, 'list')
+    self.mox.StubOutWithMock(nova_client, 'servers')
+    self.mox.StubOutWithMock(nova_client.servers, 'list')
+    self.mox.StubOutWithMock(auto_evacuate, 'acknowledge')
+    server = mox.MockAnything()
+    server.host='dummyhost'
+    server.zone='zone1'
+    servers=[]
+    servers.append(server)
+    self.mox.StubOutWithMock(auto_evacuate, 'conf')
+    
+    nova_client.services.list(binary='nova-compute').AndReturn(servers)
+    auto_evacuate.conf['surplus_host_dict'].AndReturn({'zone1':['host01']})
+    nova_client.servers.list(mox.IgnoreArg(), mox.IgnoreArg()).AndReturn(['dummy01', 'dummy02'])
+    auto_evacuate.acknowledge(mox.IgnoreArg(), mox.IgnoreArg())
+
+    self.mox.ReplayAll()
+    auto_evacuate.get_destination_server(nova_client)
+    self.mox.VerifyAll()
+    
+  def test_process_evacuate_OK(self):
+    nova_client = mox.MockAnything()
+    target_vms = []
+    destination_host = 'dummy host'
+    vm = mox.MockAnything()
+    vm.__dict__['OS-EXT-STS:vm_state']='active'
+    vm.id='123456789'
+    target_vms.append(vm)
+
+    self.mox.StubOutWithMock(auto_evacuate, 'acknowledge')
+    self.mox.StubOutWithMock(nova_client, 'servers')
+    self.mox.StubOutWithMock(nova_client.servers, 'evacuate')
+    self.mox.StubOutWithMock(auto_evacuate, 'conf')
+    auto_evacuate.conf['evacuate_with_shared_storage'].AndReturn(True)
+
+    auto_evacuate.acknowledge(mox.IgnoreArg(), mox.IgnoreArg())
+    nova_client.servers.evacuate(server=vm.id, host=destination_host, on_shared_storage=True)
+
+    self.mox.ReplayAll()
+    auto_evacuate.process_evacuate(nova_client, target_vms, destination_host)
+    self.mox.VerifyAll()
+
+  def test_process_evacuate_NG1(self):
+    nova_client = mox.MockAnything()
+    target_vms = []
+    destination_host = 'dummy host'
+    vm = mox.MockAnything()
+    vm.__dict__['OS-EXT-STS:vm_state']='active'
+    vm.id='123456789'
+    target_vms.append(vm)
+
+    self.mox.StubOutWithMock(auto_evacuate, 'acknowledge')
+    self.mox.StubOutWithMock(nova_client, 'servers')
+    self.mox.StubOutWithMock(nova_client.servers, 'evacuate')
+    self.mox.StubOutWithMock(auto_evacuate, 'conf')
+    auto_evacuate.conf['evacuate_with_shared_storage'].AndReturn(True)
+
+    auto_evacuate.acknowledge(mox.IgnoreArg(), mox.IgnoreArg())
+    nova_client.servers.evacuate(server=vm.id, host=destination_host, on_shared_storage=True).AndRaise(novaclient.exceptions.BadRequest('dummy exception'))
+    auto_evacuate.acknowledge(mox.IgnoreArg(), mox.IgnoreArg())
+
+    self.mox.ReplayAll()
+    auto_evacuate.process_evacuate(nova_client, target_vms, destination_host)
+    self.mox.VerifyAll()
+
+  def test_process_evacuate_NG2(self):
+    nova_client = mox.MockAnything()
+    target_vms = []
+    destination_host = 'dummy host'
+    vm = mox.MockAnything()
+    vm.__dict__['OS-EXT-STS:vm_state']='active'
+    vm.id='123456789'
+    target_vms.append(vm)
+
+    self.mox.StubOutWithMock(auto_evacuate, 'acknowledge')
+    self.mox.StubOutWithMock(nova_client, 'servers')
+    self.mox.StubOutWithMock(nova_client.servers, 'evacuate')
+    self.mox.StubOutWithMock(auto_evacuate, 'conf')
+    auto_evacuate.conf['evacuate_with_shared_storage'].AndReturn(True)
+
+    auto_evacuate.acknowledge(mox.IgnoreArg(), mox.IgnoreArg())
+    nova_client.servers.evacuate(server=vm.id, host=destination_host, on_shared_storage=True).AndRaise(Exception('dummy exception'))
+    auto_evacuate.acknowledge(mox.IgnoreArg(), mox.IgnoreArg())
+
+    self.mox.ReplayAll()
+    auto_evacuate.process_evacuate(nova_client, target_vms, destination_host)
+    self.mox.VerifyAll()
+
+  def test_is_finished_evacuate_OK(self):
+    nova_client = mox.MockAnything()
+    destination_host = 'dummy'
+    vm = mox.MockAnything()
+    vm.id='123456789'
+    status = mox.MockAnything()
+    status._info={'OS-EXT-SRV-ATTR:host': 'dummy', 'OS-EXT-STS:task_state': None}
+    status.status = u'ACTIVE'
+    self.mox.StubOutWithMock(nova_client, 'servers')
+    self.mox.StubOutWithMock(nova_client.servers, 'get')
+    self.mox.StubOutWithMock(auto_evacuate, 'acknowledge')
+
+    nova_client.servers.get(server=vm.id).AndReturn(status)
+    auto_evacuate.acknowledge(mox.IgnoreArg(), mox.IgnoreArg())
+
+    self.mox.ReplayAll()
+    auto_evacuate.is_finished_evacuate(nova_client, vm.id, destination_host)
+    self.mox.VerifyAll()
+
+  def test_is_finished_evacuate_OK2(self):
+    nova_client = mox.MockAnything()
+    destination_host = 'dummy'
+    vm = mox.MockAnything()
+    vm.id='123456789'
+    status = mox.MockAnything()
+    status._info={'OS-EXT-SRV-ATTR:host': 'dummy', 'OS-EXT-STS:task_state': None}
+    status.status = u'DUMMY'
+    self.mox.StubOutWithMock(nova_client, 'servers')
+    self.mox.StubOutWithMock(nova_client.servers, 'get')
+    self.mox.StubOutWithMock(auto_evacuate, 'acknowledge')
+
+    nova_client.servers.get(server=vm.id).AndReturn(status)
+    auto_evacuate.acknowledge(mox.IgnoreArg(), mox.IgnoreArg())
+
+    self.mox.ReplayAll()
+    auto_evacuate.is_finished_evacuate(nova_client, vm.id, destination_host)
+    self.mox.VerifyAll()
+
+  def test_check_evacuate_OK(self):
+    nova_client = mox.MockAnything()
+    check_vm_list = ['host01']
+    destination_host = 'dummy'
+    self.mox.StubOutWithMock(auto_evacuate, 'conf')
+    self.mox.StubOutWithMock(time, 'time')
+    self.mox.StubOutWithMock(auto_evacuate, 'acknowledge')
+    self.mox.StubOutWithMock(auto_evacuate, 'is_finished_evacuate')
+
+    time.time().AndReturn(100)
+    auto_evacuate.conf['timeout'].AndReturn(300)
+    auto_evacuate.conf['sleep_time'].AndReturn(0.1)
+    time.time().AndReturn(200)
+    auto_evacuate.acknowledge(mox.IgnoreArg(), mox.IgnoreArg())
+    auto_evacuate.is_finished_evacuate(mox.IgnoreArg(), mox.IgnoreArg(), mox.IgnoreArg()).AndReturn(True)
+    auto_evacuate.acknowledge(mox.IgnoreArg(), mox.IgnoreArg())
+
+    self.mox.ReplayAll()
+    auto_evacuate.check_evacuate(nova_client, check_vm_list, destination_host)
+    self.mox.VerifyAll()
+
+  def test_check_evacuate_OK2(self):
+    nova_client = mox.MockAnything()
+    check_vm_list = ['host01']
+    destination_host = 'dummy'
+    self.mox.StubOutWithMock(auto_evacuate, 'conf')
+    self.mox.StubOutWithMock(time, 'time')
+    self.mox.StubOutWithMock(auto_evacuate, 'acknowledge')
+    self.mox.StubOutWithMock(auto_evacuate, 'is_finished_evacuate')
+
+    time.time().AndReturn(100)
+    auto_evacuate.conf['timeout'].AndReturn(300)
+    auto_evacuate.conf['sleep_time'].AndReturn(0.1)
+    time.time().AndReturn(500)
+    auto_evacuate.acknowledge(mox.IgnoreArg(), mox.IgnoreArg())
+
+    self.mox.ReplayAll()
+    auto_evacuate.check_evacuate(nova_client, check_vm_list, destination_host)
     self.mox.VerifyAll()
 
 if __name__ == '__main__':
